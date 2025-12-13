@@ -15,7 +15,7 @@ def main():
                 print(f"received the request:\n{request.strip()}")
                 req_line, _, _ = request.partition("\r\n")
                 url = req_line.split(" ")[1]
-                resp = "HTTP/1.1 404 Not Found\r\n"
+                resp = "HTTP/1.1 404 Not Found\r\n\r\n"
                 if url == "/":
                     resp = "HTTP/1.1 200 OK\r\n\r\n"
                 print(f"\nSending the response:\n{resp}")
