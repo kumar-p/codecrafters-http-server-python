@@ -21,6 +21,8 @@ def main():
                     content_length = len(url_param)
                     headers = f"Content-type: text/plain\r\nContent-Length: {content_length}"
                     resp = f"HTTP/1.1 200 OK\r\n{headers}\r\n\r\n{url_param}"
+                if url == "/":
+                    resp = "HTTP/1.1 200 OK\r\n\r\n"
                 print(f"\nSending the response:\n{resp}")
                 connection.sendall(resp.encode())
 
