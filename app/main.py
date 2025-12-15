@@ -1,10 +1,9 @@
 import argparse
 import logging
-from HTTPServer import HTTPServer
+from app.HTTPServer import HTTPServer
 
 HOST = "localhost"
 PORT = 4221
-
 
 def main():
     logging.basicConfig(level=logging.INFO)

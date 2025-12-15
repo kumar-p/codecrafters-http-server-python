@@ -98,7 +98,7 @@ class HTTPServer:
     def get_file_response(files_directory, file_name):
         file_path = os.path.join(files_directory, file_name)
         if os.path.isfile(file_path):
-            with open(file_name, "r") as file:
+            with open(file_path, "r") as file:
                 file_text = file.read()
                 content_length = len(file_text)
                 headers = f"Content-Type: application/octet-stream\r\nContent-Length: {content_length}"
