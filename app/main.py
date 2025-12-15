@@ -1,3 +1,5 @@
+import argparse
+import os
 import socket
 import logging
 from threading import Thread
@@ -6,18 +8,28 @@ NOT_FOUND = "HTTP/1.1 404 Not Found\r\n\r\n"
 OK = "HTTP/1.1 200 OK"
 HOST = "localhost"
 PORT = 4221
-CONNECTION_TIMEOUT = 5.0 #seconds
+CONNECTION_TIMEOUT = 5.0  # seconds
 BUFFER_SIZE = 1024
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--directory", default="./", help="Files directory")
+args = parser.parse_args()
+files_directory = args.directory
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 def main():
     with socket.create_server((HOST, PORT), reuse_port=True) as server:
         logger.info(f"Listening on {HOST}:{PORT}")
         while True:
             connection, client_address = server.accept()
-            thread = Thread(target=on_client_connection, args=(connection, client_address), daemon=True)
+            thread = Thread(
+                target=on_client_connection,
+                args=(connection, client_address),
+                daemon=True,
+            )
             thread.start()
 
 
@@ -44,7 +56,10 @@ def on_client_connection(connection, client_address):
                 logger.debug(f"Connection timeout for {client_address} (idle)")
                 break
             except Exception as e:
-                logger.error(f"Error while processing request for {client_address}: {e}", exc_info=True)
+                logger.error(
+                    f"Error while processing request for {client_address}: {e}",
+                    exc_info=True,
+                )
                 break
 
 
@@ -56,6 +71,8 @@ def create_response(request_name, url_param, req_headers: dict[str, str]) -> str
         resp = get_echo_response(url_param)
     elif request_name == "user-agent":
         resp = get_user_agent_response(req_headers)
+    elif request_name == "files":
+        resp = get_file_response(url_param)
     logger.debug(f"\nSending the response:\n{resp:50}")
     return resp
 
@@ -71,13 +88,25 @@ def get_user_agent_response(headers):
 
 def get_response_with_text(body_text) -> str:
     content_length = len(body_text)
-    headers = f"Content-type: text/plain\r\nContent-Length: {content_length}"
+    headers = f"Content-Type: text/plain\r\nContent-Length: {content_length}"
     resp = f"{OK}\r\n{headers}\r\n\r\n{body_text}"
     return resp
 
 
+def get_file_response(file_name):
+    file_path = os.path.join(files_directory, file_name)
+    if os.path.isfile(file_path):
+        with open(file_name, "r") as file:
+            file_text = file.read()
+            content_length = len(file_text)
+            headers = f"Content-Type: application/octet-stream\r\nContent-Length: {content_length}"
+            resp = f"{OK}\r\n{headers}\r\n\r\n{file_text}"
+            return resp
+    return NOT_FOUND
+
+
 def get_url_contents(url):
-    request_name, _, param =  url.strip("/").partition("/")
+    request_name, _, param = url.strip("/").partition("/")
     return request_name.lower(), param
 
 
