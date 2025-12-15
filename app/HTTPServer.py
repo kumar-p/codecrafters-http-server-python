@@ -7,6 +7,7 @@ from threading import Thread
 class HTTPServer:
     NOT_FOUND = "HTTP/1.1 404 Not Found\r\n\r\n"
     OK = "HTTP/1.1 200 OK"
+    CREATED = "HTTP/1.1 201 Created\r\n\r\n"
     CONNECTION_TIMEOUT = 5.0  # seconds
     BUFFER_SIZE = 1024
 
@@ -41,9 +42,11 @@ class HTTPServer:
                         break
 
                     self.logger.info(f"Received {len(req)} bytes from {client_address}")
-                    url, req_headers = self.get_request_contents(req)
+                    verb, url, req_headers, content = self.get_request_contents(req)
                     request_name, url_param = self.get_url_contents(url)
-                    resp = self.create_response(request_name, url_param, req_headers)
+                    resp = self.create_response(
+                        verb, request_name, url_param, req_headers, content
+                    )
                     connection.sendall(resp.encode())
                     self.logger.info(f"Sent response to {client_address}")
 
@@ -58,7 +61,7 @@ class HTTPServer:
                     break
 
     def create_response(
-        self, request_name, url_param, req_headers: dict[str, str]
+        self, verb, request_name, url_param, req_headers: dict[str, str], content
     ) -> str:
         resp = HTTPServer.NOT_FOUND
         if request_name == "":
@@ -68,7 +71,9 @@ class HTTPServer:
         elif request_name == "user-agent":
             resp = self.get_user_agent_response(req_headers)
         elif request_name == "files":
-            resp = self.get_file_response(self.files_directory, url_param)
+            resp = self.get_file_response(
+                self.files_directory, verb, url_param, content
+            )
         self.logger.debug(f"\nSending the response:\n{resp:50}")
         return resp
 
@@ -82,10 +87,26 @@ class HTTPServer:
     def get_request_contents(self, req: bytes):
         request = req.decode()
         req_line, _, headers_and_content = request.partition("\r\n")
-        url = req_line.split(" ")[1]
-        header_string = headers_and_content.partition("\r\n\r\n")[0]
+        req_components = req_line.split(" ")
+        verb = req_components[0]
+        url = req_components[1]
+        header_string, _, content = headers_and_content.partition("\r\n\r\n")
         headers_dict = self.get_headers_dict(header_string)
-        return url, headers_dict
+        return verb, url, headers_dict, content
+
+    def get_file_response(self, files_directory, verb, file_name, content):
+        file_path = os.path.join(files_directory, file_name)
+        if verb == "GET":
+            if os.path.isfile(file_path):
+                file_text = self.read_file(file_path)
+                content_length = len(file_text)
+                headers = f"Content-Type: application/octet-stream\r\nContent-Length: {content_length}"
+                resp = f"{HTTPServer.OK}\r\n{headers}\r\n\r\n{file_text}"
+                return resp
+        elif verb == "POST":
+            self.write_file(file_path, content)
+            return HTTPServer.CREATED
+        return HTTPServer.NOT_FOUND
 
     @staticmethod
     def get_response_with_text(body_text) -> str:
@@ -95,16 +116,15 @@ class HTTPServer:
         return resp
 
     @staticmethod
-    def get_file_response(files_directory, file_name):
-        file_path = os.path.join(files_directory, file_name)
-        if os.path.isfile(file_path):
-            with open(file_path, "r") as file:
-                file_text = file.read()
-                content_length = len(file_text)
-                headers = f"Content-Type: application/octet-stream\r\nContent-Length: {content_length}"
-                resp = f"{HTTPServer.OK}\r\n{headers}\r\n\r\n{file_text}"
-                return resp
-        return HTTPServer.NOT_FOUND
+    def read_file(file_path):
+        with open(file_path, "r") as file:
+            file_text = file.read()
+            return file_text
+
+    @staticmethod
+    def write_file(file_path, content):
+        with open(file_path, "w") as file:
+            file.write(content)
 
     @staticmethod
     def get_url_contents(url):
