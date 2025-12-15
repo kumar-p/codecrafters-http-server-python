@@ -1,30 +1,63 @@
-import socket  # noqa: F401
-
+import socket
+import logging
+from threading import Thread
 
 NOT_FOUND = "HTTP/1.1 404 Not Found\r\n\r\n"
 OK = "HTTP/1.1 200 OK"
 HOST = "localhost"
 PORT = 4221
+CONNECTION_TIMEOUT = 5.0 #seconds
+BUFFER_SIZE = 1024
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def main():
-
-    with socket.create_server((HOST, PORT)) as server:
+    with socket.create_server((HOST, PORT), reuse_port=True) as server:
+        logger.info(f"Listening on {HOST}:{PORT}")
         while True:
             connection, client_address = server.accept()
-            print("Connected by", client_address)
-            with connection:
-                req = connection.recv(1024)
+            thread = Thread(target=on_client_connection, args=(connection, client_address), daemon=True)
+            thread.start()
+
+
+def on_client_connection(connection, client_address):
+    logger.info(f"Connection received from: {client_address}")
+    with connection:
+        connection.settimeout(CONNECTION_TIMEOUT)
+        while True:
+            try:
+                logger.debug(f"Waiting for data from {client_address}...")
+                req = connection.recv(BUFFER_SIZE)
+                if not req:
+                    logger.info(f"Connection closed by {client_address}")
+                    break
+
+                logger.info(f"Received {len(req)} bytes from {client_address}")
                 url, req_headers = get_request_contents(req)
                 request_name, url_param = get_url_contents(url)
-                resp = NOT_FOUND
-                if request_name == "":
-                    resp = f"{OK}\r\n\r\n"
-                elif request_name == "echo":
-                    resp = get_echo_response(url_param)
-                elif request_name == "user-agent":
-                    resp = get_user_agent_response(req_headers)
-                print(f"\nSending the response:\n{resp}")
+                resp = create_response(request_name, url_param, req_headers)
                 connection.sendall(resp.encode())
+                logger.info(f"Sent response to {client_address}")
+
+            except socket.timeout:
+                logger.debug(f"Connection timeout for {client_address} (idle)")
+                break
+            except Exception as e:
+                logger.error(f"Error while processing request for {client_address}: {e}", exc_info=True)
+                break
+
+
+def create_response(request_name, url_param, req_headers: dict[str, str]) -> str:
+    resp = NOT_FOUND
+    if request_name == "":
+        resp = f"{OK}\r\n\r\n"
+    elif request_name == "echo":
+        resp = get_echo_response(url_param)
+    elif request_name == "user-agent":
+        resp = get_user_agent_response(req_headers)
+    logger.debug(f"\nSending the response:\n{resp:50}")
+    return resp
 
 
 def get_echo_response(url_param):
