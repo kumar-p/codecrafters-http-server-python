@@ -1,4 +1,3 @@
-import pathlib
 from pathlib import Path
 import socket
 from http import HTTPStatus
@@ -54,14 +53,8 @@ class HTTPServer:
                         connection.sendall(resp.to_bytes())
                         continue
                     resp = self.create_response(http_request)
-                    if "Accept-Encoding" in http_request.headers:
-                        connection.sendall(
-                            resp.to_bytes(
-                                compression=http_request.headers["Accept-Encoding"]
-                            )
-                        )
-                    else:
-                        connection.sendall(resp.to_bytes())
+                    compression = http_request.headers.get("Accept-Encoding")
+                    connection.sendall(resp.to_bytes(compression=compression))
                     self.logger.info(f"Sent response to {client_address}")
 
                 except socket.timeout:
@@ -82,7 +75,7 @@ class HTTPServer:
             case "":
                 return HttpResponse(HTTPStatus.OK, {}, "")
             case "echo":
-                return self.get_echo_response(http_request.route_param)
+                return self.get_response_with_text(http_request.route_param)
             case "user-agent":
                 return self.get_user_agent_response(http_request.headers)
             case "files":
@@ -90,17 +83,14 @@ class HTTPServer:
             case _:
                 return HttpResponse(HTTPStatus.NOT_FOUND, {}, "")
 
-    def get_echo_response(self, url_param: str) -> HttpResponse:
-        return self.get_response_with_text(url_param)
-
-    def get_user_agent_response(self, headers):
-        user_agent = headers["User-Agent"]
+    def get_user_agent_response(self, headers: dict[str, str]) -> HttpResponse:
+        user_agent = headers.get("User-Agent", "")
         return self.get_response_with_text(user_agent.strip())
 
     def get_file_response(
         self, files_directory: str, http_request: HTTPRequest
     ) -> HttpResponse:
-        file_path = pathlib.Path(files_directory) / http_request.route_param
+        file_path = Path(files_directory) / http_request.route_param
         match http_request.method:
             case "GET":
                 if not file_path.is_file():
@@ -117,17 +107,14 @@ class HTTPServer:
                 return HttpResponse(HTTPStatus.NOT_FOUND, {}, "")
 
     @staticmethod
-    def get_response_with_text(body_text) -> HttpResponse:
+    def get_response_with_text(body_text: str) -> HttpResponse:
         headers = {"Content-Type": "text/plain"}
         return HttpResponse(HTTPStatus.OK, headers, body_text)
 
     @staticmethod
-    def read_file(file_path: Path):
-        with file_path.open() as file:
-            file_text = file.read()
-            return file_text
+    def read_file(file_path: Path) -> str:
+        return file_path.read_text()
 
     @staticmethod
-    def write_file(file_path: Path, content):
-        with file_path.open("w") as file:
-            file.write(content)
+    def write_file(file_path: Path, content: str) -> None:
+        file_path.write_text(content)
