@@ -1,6 +1,6 @@
 import argparse
 import logging
-from app.HTTPServer import HTTPServer
+from app.http_server import HTTPServer
 
 HOST = "localhost"
 PORT = 4221
