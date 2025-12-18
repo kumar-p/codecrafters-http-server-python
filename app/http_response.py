@@ -19,10 +19,12 @@ class HttpResponse:
         body_content = self._encode_content(self.body, use_compression, headers_lines)
 
         headers_lines.append(f"Content-Length: {len(body_content)}")
-        response_parts_without_body = [status_line, *headers_lines, "\r\n"]
-        response_without_body = "\r\n".join(response_parts_without_body).encode()
-        response = response_without_body + body_content
-        return response
+
+        # Build HTTP response with proper structure: status + headers + empty line + body
+        response_lines = [status_line] + headers_lines + [""]
+        headers_section = "\r\n".join(response_lines) + "\r\n"
+
+        return headers_section.encode() + body_content
 
     @staticmethod
     def _encode_content(body: str, compression: str | None, headers_lines: list[str]) -> bytes:
