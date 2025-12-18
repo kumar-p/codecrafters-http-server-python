@@ -9,7 +9,7 @@ SUPPORTED_COMPRESSIONS = frozenset({"gzip"})
 class HttpResponse:
     status: HTTPStatus
     headers: dict[str, str]
-    body: str
+    body: str | bytes
 
     def to_bytes(self, compression: str | None = None) -> bytes:
         status_line = f"HTTP/1.1 {self.status.value} {self.status.phrase}"
@@ -27,13 +27,18 @@ class HttpResponse:
         return headers_section.encode() + body_content
 
     @staticmethod
-    def _encode_content(body: str, compression: str | None, headers_lines: list[str]) -> bytes:
+    def _encode_content(
+        body: str | bytes, compression: str | None, headers_lines: list[str]
+    ) -> bytes:
+        # Convert to bytes first
+        body_bytes = body.encode() if isinstance(body, str) else body
+
         match compression:
             case "gzip":
                 headers_lines.append(f"Content-Encoding: {compression}")
-                return gzip.compress(body.encode())
+                return gzip.compress(body_bytes)
             case _:
-                return body.encode()
+                return body_bytes
 
     @staticmethod
     def _negotiate_compression(accept_encoding: str | None) -> str | None:
