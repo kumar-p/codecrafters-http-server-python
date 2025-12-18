@@ -6,9 +6,7 @@ from threading import Thread
 from app.http_request import HTTPRequest
 from app.http_response import HttpResponse
 from app.request_parser import RequestParser, HTTPParseError
-
-USER_AGENT = "user-agent"
-ACCEPT_ENCODING = "accept-encoding"
+import app.http_constants as constants
 
 
 class HTTPServer:
@@ -56,9 +54,16 @@ class HTTPServer:
                         connection.sendall(resp.to_bytes())
                         continue
                     resp = self.create_response(http_request)
-                    compression = http_request.headers.get(ACCEPT_ENCODING)
+
+                    if http_request.headers.get(constants.CONNECTION) == "close":
+                        resp.headers["Connection"] = "close"
+
+                    compression = http_request.headers.get(constants.ACCEPT_ENCODING)
                     connection.sendall(resp.to_bytes(compression=compression))
                     self.logger.info(f"Sent response to {client_address}")
+
+                    if http_request.headers.get(constants.CONNECTION) == "close":
+                        break
 
                 except socket.timeout:
                     self.logger.debug(f"Connection timeout for {client_address} (idle)")
@@ -87,7 +92,7 @@ class HTTPServer:
                 return HttpResponse(HTTPStatus.NOT_FOUND, {}, "")
 
     def get_user_agent_response(self, headers: dict[str, str]) -> HttpResponse:
-        user_agent = headers.get(USER_AGENT, "")
+        user_agent = headers.get(constants.USER_AGENT, "")
         return self.get_response_with_text(user_agent.strip())
 
     def get_file_response(
