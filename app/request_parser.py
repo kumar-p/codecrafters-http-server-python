@@ -154,7 +154,7 @@ class RequestParser:
         for header in header_string.split(REQUEST_LINE_SEPARATOR):
             if HEADER_KEY_VALUE_SEPARATOR in header:
                 key, value = header.split(HEADER_KEY_VALUE_SEPARATOR, 1)
-                headers_dict[key.strip()] = value.strip()
+                headers_dict[key.strip().lower()] = value.strip()
         return headers_dict
 
     @staticmethod

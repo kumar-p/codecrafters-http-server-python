@@ -7,6 +7,9 @@ from app.http_request import HTTPRequest
 from app.http_response import HttpResponse
 from app.request_parser import RequestParser, HTTPParseError
 
+USER_AGENT = "user-agent"
+ACCEPT_ENCODING = "accept-encoding"
+
 
 class HTTPServer:
     CONNECTION_TIMEOUT = 5.0  # seconds
@@ -53,7 +56,7 @@ class HTTPServer:
                         connection.sendall(resp.to_bytes())
                         continue
                     resp = self.create_response(http_request)
-                    compression = http_request.headers.get("Accept-Encoding")
+                    compression = http_request.headers.get(ACCEPT_ENCODING)
                     connection.sendall(resp.to_bytes(compression=compression))
                     self.logger.info(f"Sent response to {client_address}")
 
@@ -84,7 +87,7 @@ class HTTPServer:
                 return HttpResponse(HTTPStatus.NOT_FOUND, {}, "")
 
     def get_user_agent_response(self, headers: dict[str, str]) -> HttpResponse:
-        user_agent = headers.get("User-Agent", "")
+        user_agent = headers.get(USER_AGENT, "")
         return self.get_response_with_text(user_agent.strip())
 
     def get_file_response(
