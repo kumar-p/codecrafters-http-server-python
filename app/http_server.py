@@ -1,10 +1,9 @@
-"""Multithreaded HTTP/1.1 server with routing support."""
+"""Async HTTP/1.1 server with routing support."""
 
+import asyncio
 import logging
-import socket
 from http import HTTPStatus
 from logging import Logger
-from threading import Thread
 
 from app.http_constants import HTTPHeaders
 from app.file_manager import FileManager
@@ -17,10 +16,10 @@ from app.router import Router
 
 class HTTPServer:
     """
-    Multithreaded HTTP/1.1 server.
+    Async HTTP/1.1 server using asyncio.
 
     Features:
-    - Thread-per-connection model
+    - Asyncio-based concurrent connection handling
     - Configurable timeouts
     - Compression support (gzip)
     - Persistent connections (Connection: keep-alive/close)
@@ -81,100 +80,105 @@ class HTTPServer:
 
         return router
 
-    def start(self):
-        """Start server and accept connections."""
-        with socket.create_server((self.host, self.port), reuse_port=True) as server:
-            self.logger.info(f"Listening on {self.host}:{self.port}")
-            while True:
-                connection, client_address = server.accept()
-                thread = Thread(
-                    target=self._handle_connection,
-                    args=(connection, client_address),
-                    daemon=True,
-                )
-                thread.start()
+    async def start(self):
+        """Start async server and accept connections."""
+        server = await asyncio.start_server(
+            self._handle_connection, self.host, self.port
+        )
+        self.logger.info(f"Listening on {self.host}:{self.port}")
 
-    def _handle_connection(self, connection: socket.socket, client_address):
+        async with server:
+            await server.serve_forever()
+
+    async def _handle_connection(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ):
         """
-        Handle single client connection (runs in thread).
+        Handle single client connection asynchronously.
 
         Args:
-            connection: Client socket connection
-            client_address: Client address tuple (host, port)
+            reader: Async stream reader for receiving data
+            writer: Async stream writer for sending data
         """
+        client_address = writer.get_extra_info("peername")
         self.logger.info(f"Connection from: {client_address}")
 
-        with connection:
-            connection.settimeout(HTTPServer.CONNECTION_TIMEOUT)
-
+        try:
             while True:
+                # Receive request with timeout
+                raw_request = await self._receive_request(reader, client_address)
+                if raw_request is None:
+                    break
+
+                # Parse request (synchronous - no change needed)
                 try:
-                    # Receive request
-                    raw_request = self._receive_request(connection, client_address)
-                    if raw_request is None:
-                        # Connection closed gracefully
-                        break
-
-                    # Parse request
-                    try:
-                        http_request = RequestParser.parse(raw_request)
-                    except HTTPParseError as e:
-                        self.logger.warning(
-                            f"Invalid request from {client_address}: {e}"
-                        )
-                        self._send_error_response(connection, HTTPStatus.BAD_REQUEST)
-                        continue
-
-                    # Process request through router
-                    response = self.router.dispatch(http_request)
-
-                    # Handle Connection header
-                    should_close = self._should_close_connection(http_request, response)
-
-                    # Send response
-                    compression = http_request.headers.get(HTTPHeaders.ACCEPT_ENCODING)
-                    connection.sendall(response.to_bytes(compression=compression))
-                    self.logger.info(f"Sent response to {client_address}")
-
-                    if should_close:
-                        break
-
-                except socket.timeout:
-                    self.logger.debug(f"Connection timeout for {client_address}")
-                    break
-                except OSError as e:
-                    # Socket errors (connection reset, broken pipe, etc.)
-                    self.logger.warning(f"Socket error for {client_address}: {e}")
-                    break
-                except Exception as e:
-                    # Unexpected errors - log and close connection
-                    self.logger.error(
-                        f"Unexpected error for {client_address}: {e}",
-                        exc_info=True,
+                    http_request = RequestParser.parse(raw_request)
+                except HTTPParseError as e:
+                    self.logger.warning(f"Invalid request from {client_address}: {e}")
+                    error_response = HttpResponse(
+                        HTTPStatus.BAD_REQUEST, {}, HTTPStatus.BAD_REQUEST.phrase
                     )
-                    try:
-                        self._send_error_response(
-                            connection, HTTPStatus.INTERNAL_SERVER_ERROR
-                        )
-                    except Exception as e:
-                        logging.exception(f"Unexpected error for {client_address}: {e}")
+                    await self._send_response(writer, error_response.to_bytes())
+                    continue
+
+                # Dispatch to router (synchronous - no change needed)
+                response = self.router.dispatch(http_request)
+
+                # Check connection close
+                should_close = self._should_close_connection(http_request, response)
+
+                # Send response
+                compression = http_request.headers.get(HTTPHeaders.ACCEPT_ENCODING)
+                await self._send_response(
+                    writer, response.to_bytes(compression=compression)
+                )
+                self.logger.info(f"Sent response to {client_address}")
+
+                if should_close:
                     break
 
-    def _receive_request(
-        self, connection: socket.socket, client_address
+        except asyncio.TimeoutError:
+            self.logger.debug(f"Connection timeout for {client_address}")
+        except asyncio.IncompleteReadError:
+            self.logger.debug(f"Client disconnected: {client_address}")
+        except OSError as e:
+            self.logger.warning(f"Socket error for {client_address}: {e}")
+        except Exception as e:
+            self.logger.error(
+                f"Unexpected error for {client_address}: {e}", exc_info=True
+            )
+            try:
+                error_response = HttpResponse(HTTPStatus.INTERNAL_SERVER_ERROR, {}, "")
+                await self._send_response(writer, error_response.to_bytes())
+            except Exception as e:
+                logging.exception(f"Failed to send error response: {e}")
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    async def _receive_request(
+        self, reader: asyncio.StreamReader, client_address
     ) -> bytes | None:
         """
-        Receive request bytes from connection.
+        Receive request bytes from async stream with timeout.
 
         Args:
-            connection: Client socket connection
+            reader: Async stream reader
             client_address: Client address for logging
 
         Returns:
-            Request bytes or None if connection closed by client
+            Request bytes or None if connection closed/timeout
         """
         self.logger.debug(f"Waiting for data from {client_address}")
-        data = connection.recv(HTTPServer.BUFFER_SIZE)
+
+        try:
+            data = await asyncio.wait_for(
+                reader.read(HTTPServer.BUFFER_SIZE),
+                timeout=HTTPServer.CONNECTION_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            self.logger.debug(f"Read timeout for {client_address}")
+            return None
 
         if not data:
             self.logger.info(f"Connection closed by {client_address}")
@@ -182,6 +186,19 @@ class HTTPServer:
 
         self.logger.info(f"Received {len(data)} bytes from {client_address}")
         return data
+
+    async def _send_response(
+        self, writer: asyncio.StreamWriter, response_bytes: bytes
+    ) -> None:
+        """
+        Send response bytes to async stream.
+
+        Args:
+            writer: Async stream writer
+            response_bytes: Response data to send
+        """
+        writer.write(response_bytes)
+        await writer.drain()
 
     @staticmethod
     def _should_close_connection(request: HTTPRequest, response: HttpResponse) -> bool:
@@ -204,18 +221,3 @@ class HTTPServer:
             return True
 
         return False
-
-    @staticmethod
-    def _send_error_response(connection: socket.socket, status: HTTPStatus) -> None:
-        """
-        Send simple error response.
-
-        Args:
-            connection: Client socket connection
-            status: HTTP status code to send
-        """
-        response = HttpResponse(status, {}, status.phrase)
-        try:
-            connection.sendall(response.to_bytes())
-        except OSError:
-            pass  # Best effort
