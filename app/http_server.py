@@ -187,8 +187,9 @@ class HTTPServer:
         self.logger.info(f"Received {len(data)} bytes from {client_address}")
         return data
 
+    @staticmethod
     async def _send_response(
-        self, writer: asyncio.StreamWriter, response_bytes: bytes
+        writer: asyncio.StreamWriter, response_bytes: bytes
     ) -> None:
         """
         Send response bytes to async stream.
