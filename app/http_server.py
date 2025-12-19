@@ -153,8 +153,9 @@ class HTTPServer:
             except Exception as e:
                 logging.exception(f"Failed to send error response: {e}")
         finally:
-            writer.close()
-            await writer.wait_closed()
+            # Close writer without waiting - prevents async exceptions during load testing
+            if not writer.is_closing():
+                writer.close()
 
     async def _receive_request(
         self, reader: asyncio.StreamReader, client_address
